@@ -1,0 +1,11 @@
+```yaml
+algorithm:
+
+  context_adaptive: true
+
+  use_dynamic_weights: true
+
+  use_context_penalty: true
+
+  use_context_repair: true
+```

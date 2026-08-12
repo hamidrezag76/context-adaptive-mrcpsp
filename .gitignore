@@ -1,0 +1,37 @@
+﻿# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.class
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log
+
+# Experimental/generated outputs
+outputs/
+results/
+
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+
+# Local environment
+.env
+.env.*
+# Backup source files
+*_backup.py
+*_backup_*.py
+*.bak
