@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 import math
@@ -58,6 +58,10 @@ def test_experimental_protocol():
         runner.adaptive_archives
     ) == set(seeds)
 
+    assert set(
+        runner.context_only_archives
+    ) == set(seeds)
+
     # -------------------------------------------------
     # Objective dimensionality
     # -------------------------------------------------
@@ -66,6 +70,7 @@ def test_experimental_protocol():
 
         for point in (
             runner.baseline_archives[seed]
+            + runner.context_only_archives[seed]
             + runner.adaptive_archives[seed]
         ):
 
@@ -86,6 +91,7 @@ def test_experimental_protocol():
 
         for point in (
             evaluator.baseline_normalized[seed]
+            + evaluator.context_only_normalized[seed]
             + evaluator.adaptive_normalized[seed]
         ):
 
@@ -142,12 +148,22 @@ def test_experimental_protocol():
         )
 
         assert (
+            result["context_only_hv"]
+            >= 0.0
+        )
+
+        assert (
             result["adaptive_hv"]
             >= 0.0
         )
 
         assert (
             result["baseline_igd_plus"]
+            >= 0.0
+        )
+
+        assert (
+            result["context_only_igd_plus"]
             >= 0.0
         )
 
@@ -166,12 +182,22 @@ def test_experimental_protocol():
     )
 
     assert (
+        summary["hypervolume"]["context_only_mean"]
+        >= 0.0
+    )
+
+    assert (
         summary["hypervolume"]["adaptive_mean"]
         >= 0.0
     )
 
     assert (
         summary["igd_plus"]["baseline_mean"]
+        >= 0.0
+    )
+
+    assert (
+        summary["igd_plus"]["context_only_mean"]
         >= 0.0
     )
 
@@ -189,7 +215,46 @@ def test_experimental_protocol():
         seeds=seeds,
     )
 
-    assert len(records) == 6
+    assert len(records) == 9
+
+    algorithms = {
+        record["algorithm"]
+        for record in records
+    }
+
+    assert algorithms == {
+        "baseline_nsga2",
+        "context_only_nsga2",
+        "ca_nsga2",
+    }
+
+    for record in records:
+
+        assert record["metadata"]["metric_reference_set"] == (
+            "common_all_three_modes"
+        )
+
+    baseline_records = [
+        record
+        for record in records
+        if record["algorithm"] == "baseline_nsga2"
+    ]
+
+    context_only_records = [
+        record
+        for record in records
+        if record["algorithm"] == "context_only_nsga2"
+    ]
+
+    adaptive_records = [
+        record
+        for record in records
+        if record["algorithm"] == "ca_nsga2"
+    ]
+
+    assert len(baseline_records) == 3
+    assert len(context_only_records) == 3
+    assert len(adaptive_records) == 3
 
     for record in records:
 
@@ -210,5 +275,13 @@ def test_experimental_protocol():
         assert (
             record["metadata"]
             ["metric_reference_set"]
-            == "common_all_seeds"
+            == "common_all_three_modes"
         )
+
+    for seed in seeds:
+
+        baseline = runner.baseline_archives[seed]
+
+        context_only = runner.context_only_archives[seed]
+
+        assert baseline == context_only

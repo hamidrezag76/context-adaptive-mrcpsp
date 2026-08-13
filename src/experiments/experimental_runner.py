@@ -2,7 +2,8 @@
 experimental_runner.py
 
 Reproducible multi-seed experimental runner for
-Baseline NSGA-II and Context-Adaptive NSGA-II.
+Baseline NSGA-II, Context-only NSGA-II,
+and Full Context-Adaptive NSGA-II.
 
 CA-SMRCPSP Research Project
 """
@@ -26,11 +27,22 @@ from src.experiments.result_store import (
 
 class ExperimentalRunner:
     """
-    Executes paired baseline and context-adaptive
-    experiments across a common set of random seeds.
+    Executes paired multi-seed experiments for three modes:
+
+        1. Baseline:
+           context_adaptive=False
+           operator_adaptive=False
+
+        2. Context-only:
+           context_adaptive=True
+           operator_adaptive=False
+
+        3. Full CA:
+           context_adaptive=True
+           operator_adaptive=True
 
     The same instance, population size, generations,
-    and seed are used for both algorithms.
+    and random seeds are used across all three modes.
     """
 
     def __init__(
@@ -42,9 +54,7 @@ class ExperimentalRunner:
         result_root: str | Path = "results/raw",
     ) -> None:
 
-        self.instance = Path(
-            instance
-        )
+        self.instance = Path(instance)
 
         self.seeds = [
             int(seed)
@@ -78,13 +88,34 @@ class ExperimentalRunner:
             result_root
         )
 
+        # -----------------------------------------------------
+        # Archives
+        # -----------------------------------------------------
+
         self.baseline_archives = {}
+
+        self.context_only_archives = {}
+
         self.adaptive_archives = {}
 
+        # -----------------------------------------------------
+        # Best solutions
+        # -----------------------------------------------------
+
         self.baseline_best = {}
+
+        self.context_only_best = {}
+
         self.adaptive_best = {}
 
+        # -----------------------------------------------------
+        # Archive sizes
+        # -----------------------------------------------------
+
         self.baseline_archive_sizes = {}
+
+        self.context_only_archive_sizes = {}
+
         self.adaptive_archive_sizes = {}
 
     # ---------------------------------------------------------
@@ -96,6 +127,7 @@ class ExperimentalRunner:
         *,
         seed: int,
         context_adaptive: bool,
+        operator_adaptive: bool,
     ):
 
         project = MMParser(
@@ -108,6 +140,7 @@ class ExperimentalRunner:
             generations=self.generations,
             seed=seed,
             context_adaptive=context_adaptive,
+            operator_adaptive=operator_adaptive,
         )
 
         algorithm.run()
@@ -149,43 +182,91 @@ class ExperimentalRunner:
         for seed in self.seeds:
 
             print(
-                f"Running seed {seed} ..."
+                f"\nRunning seed {seed} ..."
             )
+
+            # -------------------------------------------------
+            # Baseline
+            # -------------------------------------------------
 
             baseline_archive, baseline_best = (
                 self._run_algorithm(
                     seed=seed,
                     context_adaptive=False,
+                    operator_adaptive=False,
                 )
             )
+
+            # -------------------------------------------------
+            # Context-only
+            # -------------------------------------------------
+
+            context_only_archive, context_only_best = (
+                self._run_algorithm(
+                    seed=seed,
+                    context_adaptive=True,
+                    operator_adaptive=False,
+                )
+            )
+
+            # -------------------------------------------------
+            # Full CA
+            # -------------------------------------------------
 
             adaptive_archive, adaptive_best = (
                 self._run_algorithm(
                     seed=seed,
                     context_adaptive=True,
+                    operator_adaptive=True,
                 )
             )
+
+            # -------------------------------------------------
+            # Store archives
+            # -------------------------------------------------
 
             self.baseline_archives[
                 seed
             ] = baseline_archive
 
+            self.context_only_archives[
+                seed
+            ] = context_only_archive
+
             self.adaptive_archives[
                 seed
             ] = adaptive_archive
+
+            # -------------------------------------------------
+            # Store best solutions
+            # -------------------------------------------------
 
             self.baseline_best[
                 seed
             ] = baseline_best
 
+            self.context_only_best[
+                seed
+            ] = context_only_best
+
             self.adaptive_best[
                 seed
             ] = adaptive_best
+
+            # -------------------------------------------------
+            # Store archive sizes
+            # -------------------------------------------------
 
             self.baseline_archive_sizes[
                 seed
             ] = len(
                 baseline_archive
+            )
+
+            self.context_only_archive_sizes[
+                seed
+            ] = len(
+                context_only_archive
             )
 
             self.adaptive_archive_sizes[
@@ -195,12 +276,17 @@ class ExperimentalRunner:
             )
 
             print(
-                f"  Baseline archive: "
+                f"  Baseline archive:    "
                 f"{len(baseline_archive)}"
             )
 
             print(
-                f"  CA archive:       "
+                f"  Context-only archive:"
+                f" {len(context_only_archive)}"
+            )
+
+            print(
+                f"  Full CA archive:     "
                 f"{len(adaptive_archive)}"
             )
 
@@ -213,12 +299,28 @@ class ExperimentalRunner:
     ) -> MultiSeedMetricsEvaluator:
 
         if not self.baseline_archives:
+
             raise RuntimeError(
                 "Experiments have not been executed."
             )
 
+        if not self.context_only_archives:
+
+            raise RuntimeError(
+                "Context-only experiments "
+                "have not been executed."
+            )
+
+        if not self.adaptive_archives:
+
+            raise RuntimeError(
+                "Full CA experiments "
+                "have not been executed."
+            )
+
         return MultiSeedMetricsEvaluator(
             self.baseline_archives,
+            self.context_only_archives,
             self.adaptive_archives,
         )
 
@@ -232,7 +334,7 @@ class ExperimentalRunner:
     ) -> None:
 
         per_seed_metrics = {
-            result["seed"]: result
+            int(result["seed"]): result
             for result in evaluator.evaluate()
         }
 
@@ -242,6 +344,10 @@ class ExperimentalRunner:
                 seed
             ]
 
+            # -------------------------------------------------
+            # Baseline metrics
+            # -------------------------------------------------
+
             baseline_metrics = {
                 "hypervolume":
                     metric["baseline_hv"],
@@ -250,12 +356,64 @@ class ExperimentalRunner:
                     metric["baseline_igd_plus"],
             }
 
+            # -------------------------------------------------
+            # Context-only metrics
+            # -------------------------------------------------
+
+            context_only_metrics = {
+                "hypervolume":
+                    metric["context_only_hv"],
+
+                "igd_plus":
+                    metric["context_only_igd_plus"],
+            }
+
+            # -------------------------------------------------
+            # Full CA metrics
+            # -------------------------------------------------
+
             adaptive_metrics = {
                 "hypervolume":
                     metric["adaptive_hv"],
 
                 "igd_plus":
                     metric["adaptive_igd_plus"],
+            }
+
+            # -------------------------------------------------
+            # Common metadata
+            # -------------------------------------------------
+
+            common_metadata = {
+                "metric_reference_set":
+                    "common_all_three_modes",
+
+                "metric_reference_point":
+                    list(
+                        evaluator.reference_point
+                    ),
+
+                "reference_set_size":
+                    len(
+                        evaluator.reference_set
+                    ),
+            }
+
+            # -------------------------------------------------
+            # Baseline
+            # -------------------------------------------------
+
+            baseline_metadata = {
+                **common_metadata,
+
+                "mode":
+                    "baseline",
+
+                "context_adaptive":
+                    False,
+
+                "operator_adaptive":
+                    False,
             }
 
             self.result_store.save_run(
@@ -271,21 +429,60 @@ class ExperimentalRunner:
                 best_objectives=(
                     self.baseline_best[seed]
                 ),
-                metadata={
-                    "context_adaptive": False,
-                    "metric_reference_set":
-                        "common_all_seeds",
-                    "metric_reference_point":
-                        list(
-                            evaluator.reference_point
-                        ),
-                    "reference_set_size":
-                        len(
-                            evaluator.reference_set
-                        ),
-                },
+                metadata=baseline_metadata,
                 overwrite=True,
             )
+
+            # -------------------------------------------------
+            # Context-only
+            # -------------------------------------------------
+
+            context_only_metadata = {
+                **common_metadata,
+
+                "mode":
+                    "context_only",
+
+                "context_adaptive":
+                    True,
+
+                "operator_adaptive":
+                    False,
+            }
+
+            self.result_store.save_run(
+                instance=self.instance.name,
+                algorithm="context_only_nsga2",
+                seed=seed,
+                population_size=self.population_size,
+                generations=self.generations,
+                archive_points=(
+                    self.context_only_archives[seed]
+                ),
+                metrics=context_only_metrics,
+                best_objectives=(
+                    self.context_only_best[seed]
+                ),
+                metadata=context_only_metadata,
+                overwrite=True,
+            )
+
+            # -------------------------------------------------
+            # Full CA
+            # -------------------------------------------------
+
+            adaptive_metadata = {
+                **common_metadata,
+
+                "mode":
+                    "full_ca",
+
+                "context_adaptive":
+                    True,
+
+                "operator_adaptive":
+                    True,
+            }
 
             self.result_store.save_run(
                 instance=self.instance.name,
@@ -300,19 +497,7 @@ class ExperimentalRunner:
                 best_objectives=(
                     self.adaptive_best[seed]
                 ),
-                metadata={
-                    "context_adaptive": True,
-                    "metric_reference_set":
-                        "common_all_seeds",
-                    "metric_reference_point":
-                        list(
-                            evaluator.reference_point
-                        ),
-                    "reference_set_size":
-                        len(
-                            evaluator.reference_set
-                        ),
-                },
+                metadata=adaptive_metadata,
                 overwrite=True,
             )
 
@@ -325,7 +510,7 @@ class ExperimentalRunner:
     ) -> dict:
 
         print(
-            "\n========== EXPERIMENT RUN =========="
+            "\n========== THREE-MODE EXPERIMENT =========="
         )
 
         print(
@@ -348,6 +533,25 @@ class ExperimentalRunner:
             self.seeds,
         )
 
+        print(
+            "\nModes:"
+        )
+
+        print(
+            "  1. Baseline     "
+            "(context=False, operator=False)"
+        )
+
+        print(
+            "  2. Context-only "
+            "(context=True, operator=False)"
+        )
+
+        print(
+            "  3. Full CA      "
+            "(context=True, operator=True)"
+        )
+
         self.run_algorithms()
 
         evaluator = self.evaluate_metrics()
@@ -358,12 +562,16 @@ class ExperimentalRunner:
 
         summary = evaluator.summary()
 
+        # -----------------------------------------------------
+        # Hypervolume summary
+        # -----------------------------------------------------
+
         print(
-            "\n========== METRIC SUMMARY =========="
+            "\n========== HYPERVOLUME SUMMARY =========="
         )
 
         print(
-            "HV baseline mean:",
+            "Baseline mean:",
             summary[
                 "hypervolume"
             ][
@@ -372,7 +580,16 @@ class ExperimentalRunner:
         )
 
         print(
-            "HV CA mean:",
+            "Context-only mean:",
+            summary[
+                "hypervolume"
+            ][
+                "context_only_mean"
+            ],
+        )
+
+        print(
+            "Full CA mean:",
             summary[
                 "hypervolume"
             ][
@@ -381,16 +598,42 @@ class ExperimentalRunner:
         )
 
         print(
-            "HV improvement:",
+            "Context-only vs Baseline:",
             summary[
                 "hypervolume"
             ][
-                "relative_improvement_percent"
+                "context_only_improvement_percent"
             ],
         )
 
         print(
-            "IGD+ baseline mean:",
+            "Full CA vs Context-only:",
+            summary[
+                "hypervolume"
+            ][
+                "adaptive_vs_context_only_improvement_percent"
+            ],
+        )
+
+        print(
+            "Full CA vs Baseline:",
+            summary[
+                "hypervolume"
+            ][
+                "adaptive_improvement_percent"
+            ],
+        )
+
+        # -----------------------------------------------------
+        # IGD+ summary
+        # -----------------------------------------------------
+
+        print(
+            "\n========== IGD+ SUMMARY =========="
+        )
+
+        print(
+            "Baseline mean:",
             summary[
                 "igd_plus"
             ][
@@ -399,7 +642,16 @@ class ExperimentalRunner:
         )
 
         print(
-            "IGD+ CA mean:",
+            "Context-only mean:",
+            summary[
+                "igd_plus"
+            ][
+                "context_only_mean"
+            ],
+        )
+
+        print(
+            "Full CA mean:",
             summary[
                 "igd_plus"
             ][
@@ -408,11 +660,29 @@ class ExperimentalRunner:
         )
 
         print(
-            "IGD+ improvement:",
+            "Context-only vs Baseline:",
             summary[
                 "igd_plus"
             ][
-                "relative_improvement_percent"
+                "context_only_improvement_percent"
+            ],
+        )
+
+        print(
+            "Full CA vs Context-only:",
+            summary[
+                "igd_plus"
+            ][
+                "adaptive_vs_context_only_improvement_percent"
+            ],
+        )
+
+        print(
+            "Full CA vs Baseline:",
+            summary[
+                "igd_plus"
+            ][
+                "adaptive_improvement_percent"
             ],
         )
 

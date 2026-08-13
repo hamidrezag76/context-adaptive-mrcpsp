@@ -2,7 +2,8 @@
 metrics_evaluator.py
 
 Multi-seed comparative evaluator for
-Baseline NSGA-II and Context-Adaptive NSGA-II.
+Baseline NSGA-II, Context-only NSGA-II,
+and Full Context-Adaptive NSGA-II.
 
 CA-SMRCPSP Research Project
 """
@@ -31,15 +32,28 @@ class MultiSeedMetricsEvaluator:
     Computes statistically comparable HV and IGD+ metrics
     across multiple stochastic optimization runs.
 
-    A single common normalization and reference construction
-    is used for all baseline and adaptive archives across
-    all supplied seeds.
+    Three experimental modes are supported:
+
+        1. baseline
+        2. context_only
+        3. adaptive
+
+    A single common normalization, nondominated reference
+    set, and HV reference point are constructed from all
+    three experimental modes across all supplied seeds.
     """
 
     def __init__(
         self,
         baseline_archives: dict[int, list[ObjectiveVector]],
-        adaptive_archives: dict[int, list[ObjectiveVector]],
+        context_only_archives: dict[
+            int,
+            list[ObjectiveVector],
+        ],
+        adaptive_archives: dict[
+            int,
+            list[ObjectiveVector],
+        ],
     ) -> None:
 
         if not baseline_archives:
@@ -47,35 +61,76 @@ class MultiSeedMetricsEvaluator:
                 "Baseline archives cannot be empty."
             )
 
+        if not context_only_archives:
+            raise ValueError(
+                "Context-only archives cannot be empty."
+            )
+
         if not adaptive_archives:
             raise ValueError(
                 "Adaptive archives cannot be empty."
             )
 
-        if set(baseline_archives) != set(
-            adaptive_archives
-        ):
-            raise ValueError(
-                "Baseline and adaptive seed sets "
-                "must be identical."
-            )
-
-        self.seeds = sorted(
+        baseline_seeds = set(
             baseline_archives
         )
 
+        context_only_seeds = set(
+            context_only_archives
+        )
+
+        adaptive_seeds = set(
+            adaptive_archives
+        )
+
+        if not (
+            baseline_seeds
+            == context_only_seeds
+            == adaptive_seeds
+        ):
+            raise ValueError(
+                "Baseline, context-only, and adaptive "
+                "seed sets must be identical."
+            )
+
+        self.seeds = sorted(
+            baseline_seeds
+        )
+
+        # -----------------------------------------------------
+        # Normalize archive representation
+        # -----------------------------------------------------
+
         self.baseline_archives = {
             seed: [
-                tuple(float(x) for x in point)
+                tuple(
+                    float(x)
+                    for x in point
+                )
                 for point in points
             ]
             for seed, points
             in baseline_archives.items()
         }
 
+        self.context_only_archives = {
+            seed: [
+                tuple(
+                    float(x)
+                    for x in point
+                )
+                for point in points
+            ]
+            for seed, points
+            in context_only_archives.items()
+        }
+
         self.adaptive_archives = {
             seed: [
-                tuple(float(x) for x in point)
+                tuple(
+                    float(x)
+                    for x in point
+                )
                 for point in points
             ]
             for seed, points
@@ -89,12 +144,21 @@ class MultiSeedMetricsEvaluator:
         for seed in self.seeds:
 
             if not self.baseline_archives[seed]:
+
                 raise ValueError(
                     f"Baseline archive for seed {seed} "
                     "is empty."
                 )
 
+            if not self.context_only_archives[seed]:
+
+                raise ValueError(
+                    f"Context-only archive for seed {seed} "
+                    "is empty."
+                )
+
             if not self.adaptive_archives[seed]:
+
                 raise ValueError(
                     f"Adaptive archive for seed {seed} "
                     "is empty."
@@ -102,6 +166,11 @@ class MultiSeedMetricsEvaluator:
 
         # -----------------------------------------------------
         # Complete experimental union
+        #
+        # IMPORTANT:
+        #
+        # All three algorithms participate in the common
+        # normalization and reference construction.
         # -----------------------------------------------------
 
         all_points = []
@@ -113,10 +182,15 @@ class MultiSeedMetricsEvaluator:
             )
 
             all_points.extend(
+                self.context_only_archives[seed]
+            )
+
+            all_points.extend(
                 self.adaptive_archives[seed]
             )
 
         if not all_points:
+
             raise ValueError(
                 "Combined experimental archive is empty."
             )
@@ -134,6 +208,10 @@ class MultiSeedMetricsEvaluator:
                     for seed in self.seeds
                 ],
                 *[
+                    self.context_only_archives[seed]
+                    for seed in self.seeds
+                ],
+                *[
                     self.adaptive_archives[seed]
                     for seed in self.seeds
                 ],
@@ -142,6 +220,8 @@ class MultiSeedMetricsEvaluator:
 
         self.baseline_normalized = {}
 
+        self.context_only_normalized = {}
+
         self.adaptive_normalized = {}
 
         for seed in self.seeds:
@@ -149,6 +229,12 @@ class MultiSeedMetricsEvaluator:
             self.baseline_normalized[seed] = (
                 self.normalizer.normalize_set(
                     self.baseline_archives[seed]
+                )
+            )
+
+            self.context_only_normalized[seed] = (
+                self.normalizer.normalize_set(
+                    self.context_only_archives[seed]
                 )
             )
 
@@ -171,10 +257,16 @@ class MultiSeedMetricsEvaluator:
             )
 
             normalized_union.extend(
+                self.context_only_normalized[seed]
+            )
+
+            normalized_union.extend(
                 self.adaptive_normalized[seed]
             )
 
-        self.normalized_union = normalized_union
+        self.normalized_union = (
+            normalized_union
+        )
 
         # -----------------------------------------------------
         # Common nondominated reference set
@@ -189,6 +281,7 @@ class MultiSeedMetricsEvaluator:
         )
 
         if not self.reference_set:
+
             raise ValueError(
                 "Common nondominated reference set "
                 "is empty."
@@ -217,6 +310,7 @@ class MultiSeedMetricsEvaluator:
     ) -> dict[str, float]:
 
         if seed not in self.seeds:
+
             raise KeyError(
                 f"Unknown seed: {seed}"
             )
@@ -233,6 +327,10 @@ class MultiSeedMetricsEvaluator:
             self.baseline_normalized[seed]
         )
 
+        context_only_hv = hypervolume.compute(
+            self.context_only_normalized[seed]
+        )
+
         adaptive_hv = hypervolume.compute(
             self.adaptive_normalized[seed]
         )
@@ -241,16 +339,34 @@ class MultiSeedMetricsEvaluator:
             self.baseline_normalized[seed]
         )
 
+        context_only_igd = igd_plus.compute(
+            self.context_only_normalized[seed]
+        )
+
         adaptive_igd = igd_plus.compute(
             self.adaptive_normalized[seed]
         )
 
         return {
             "seed": float(seed),
-            "baseline_hv": baseline_hv,
-            "adaptive_hv": adaptive_hv,
-            "baseline_igd_plus": baseline_igd,
-            "adaptive_igd_plus": adaptive_igd,
+
+            "baseline_hv":
+                baseline_hv,
+
+            "context_only_hv":
+                context_only_hv,
+
+            "adaptive_hv":
+                adaptive_hv,
+
+            "baseline_igd_plus":
+                baseline_igd,
+
+            "context_only_igd_plus":
+                context_only_igd,
+
+            "adaptive_igd_plus":
+                adaptive_igd,
         }
 
     # ---------------------------------------------------------
@@ -267,7 +383,7 @@ class MultiSeedMetricsEvaluator:
         ]
 
     # ---------------------------------------------------------
-    # Summary
+    # Summary helpers
     # ---------------------------------------------------------
 
     @staticmethod
@@ -276,6 +392,7 @@ class MultiSeedMetricsEvaluator:
     ) -> float:
 
         if not values:
+
             raise ValueError(
                 "Cannot compute mean of empty values."
             )
@@ -291,6 +408,7 @@ class MultiSeedMetricsEvaluator:
     ) -> float:
 
         if len(values) < 2:
+
             return 0.0
 
         mean = (
@@ -311,24 +429,29 @@ class MultiSeedMetricsEvaluator:
     @staticmethod
     def _relative_improvement(
         baseline: float,
-        adaptive: float,
+        alternative: float,
         higher_is_better: bool,
     ) -> float:
 
         if baseline == 0.0:
+
             return 0.0
 
         if higher_is_better:
 
             return (
-                (adaptive - baseline)
+                (alternative - baseline)
                 / abs(baseline)
             ) * 100.0
 
         return (
-            (baseline - adaptive)
+            (baseline - alternative)
             / abs(baseline)
         ) * 100.0
+
+    # ---------------------------------------------------------
+    # Summary
+    # ---------------------------------------------------------
 
     def summary(
         self,
@@ -336,8 +459,17 @@ class MultiSeedMetricsEvaluator:
 
         results = self.evaluate()
 
+        # -----------------------------------------------------
+        # Hypervolume
+        # -----------------------------------------------------
+
         baseline_hv = [
             r["baseline_hv"]
+            for r in results
+        ]
+
+        context_only_hv = [
+            r["context_only_hv"]
             for r in results
         ]
 
@@ -346,8 +478,17 @@ class MultiSeedMetricsEvaluator:
             for r in results
         ]
 
+        # -----------------------------------------------------
+        # IGD+
+        # -----------------------------------------------------
+
         baseline_igd = [
             r["baseline_igd_plus"]
+            for r in results
+        ]
+
+        context_only_igd = [
+            r["context_only_igd_plus"]
             for r in results
         ]
 
@@ -356,8 +497,16 @@ class MultiSeedMetricsEvaluator:
             for r in results
         ]
 
+        # -----------------------------------------------------
+        # Means
+        # -----------------------------------------------------
+
         baseline_hv_mean = self._mean(
             baseline_hv
+        )
+
+        context_only_hv_mean = self._mean(
+            context_only_hv
         )
 
         adaptive_hv_mean = self._mean(
@@ -368,9 +517,17 @@ class MultiSeedMetricsEvaluator:
             baseline_igd
         )
 
+        context_only_igd_mean = self._mean(
+            context_only_igd
+        )
+
         adaptive_igd_mean = self._mean(
             adaptive_igd
         )
+
+        # -----------------------------------------------------
+        # Summary
+        # -----------------------------------------------------
 
         return {
 
@@ -384,6 +541,14 @@ class MultiSeedMetricsEvaluator:
                         baseline_hv
                     ),
 
+                "context_only_mean":
+                    context_only_hv_mean,
+
+                "context_only_std":
+                    self._sample_std(
+                        context_only_hv
+                    ),
+
                 "adaptive_mean":
                     adaptive_hv_mean,
 
@@ -392,7 +557,24 @@ class MultiSeedMetricsEvaluator:
                         adaptive_hv
                     ),
 
-                "relative_improvement_percent":
+                # Context-only vs baseline
+                "context_only_improvement_percent":
+                    self._relative_improvement(
+                        baseline_hv_mean,
+                        context_only_hv_mean,
+                        higher_is_better=True,
+                    ),
+
+                # Full CA vs context-only
+                "adaptive_vs_context_only_improvement_percent":
+                    self._relative_improvement(
+                        context_only_hv_mean,
+                        adaptive_hv_mean,
+                        higher_is_better=True,
+                    ),
+
+                # Full CA vs baseline
+                "adaptive_improvement_percent":
                     self._relative_improvement(
                         baseline_hv_mean,
                         adaptive_hv_mean,
@@ -410,6 +592,14 @@ class MultiSeedMetricsEvaluator:
                         baseline_igd
                     ),
 
+                "context_only_mean":
+                    context_only_igd_mean,
+
+                "context_only_std":
+                    self._sample_std(
+                        context_only_igd
+                    ),
+
                 "adaptive_mean":
                     adaptive_igd_mean,
 
@@ -418,7 +608,24 @@ class MultiSeedMetricsEvaluator:
                         adaptive_igd
                     ),
 
-                "relative_improvement_percent":
+                # Context-only vs baseline
+                "context_only_improvement_percent":
+                    self._relative_improvement(
+                        baseline_igd_mean,
+                        context_only_igd_mean,
+                        higher_is_better=False,
+                    ),
+
+                # Full CA vs context-only
+                "adaptive_vs_context_only_improvement_percent":
+                    self._relative_improvement(
+                        context_only_igd_mean,
+                        adaptive_igd_mean,
+                        higher_is_better=False,
+                    ),
+
+                # Full CA vs baseline
+                "adaptive_improvement_percent":
                     self._relative_improvement(
                         baseline_igd_mean,
                         adaptive_igd_mean,
