@@ -8,9 +8,19 @@ multi-mode experimental protocol.
 from __future__ import annotations
 
 import csv
+import math
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+
+from src.experiments.experimental_runner import (
+    ExperimentalRunner,
+)
+
+from src.experiments.result_store import (
+    ResultStore,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +123,10 @@ class CampaignRunner:
         )
 
         self.instances: list[CampaignInstance] = []
+
+        self.result_store = ResultStore(
+            self.result_root
+        )
 
     # ---------------------------------------------------------
     # Manifest loading
@@ -505,6 +519,144 @@ class CampaignRunner:
         return counts.pop()
 
     # ---------------------------------------------------------
+    # Result validation
+    # ---------------------------------------------------------
+
+    def result_path(
+        self,
+        instance: CampaignInstance,
+        seed: int,
+        algorithm: str,
+    ) -> Path:
+
+        return self.result_store.run_path(
+            instance=instance.instance,
+            algorithm=algorithm,
+            seed=seed,
+        )
+
+    def is_result_valid(
+        self,
+        instance: CampaignInstance,
+        seed: int,
+        algorithm: str,
+    ) -> bool:
+
+        if algorithm not in self.ALGORITHMS:
+            raise ValueError(
+                f"Unknown algorithm: {algorithm}"
+            )
+
+        path = self.result_path(
+            instance,
+            seed,
+            algorithm,
+        )
+
+        if not path.exists():
+            return False
+
+        try:
+
+            record = self.result_store.load_run(
+                instance=instance.instance,
+                algorithm=algorithm,
+                seed=seed,
+            )
+
+        except (
+            FileNotFoundError,
+            OSError,
+            ValueError,
+        ):
+            return False
+
+        if record.get("instance") != instance.instance:
+            return False
+
+        if int(record.get("seed", -1)) != int(seed):
+            return False
+
+        if record.get("algorithm") != algorithm:
+            return False
+
+        archive = record.get(
+            "archive_objectives"
+        )
+
+        if not isinstance(
+            archive,
+            list,
+        ):
+            return False
+
+        if not archive:
+            return False
+
+        for point in archive:
+
+            if not isinstance(
+                point,
+                list,
+            ):
+                return False
+
+            if len(point) != 4:
+                return False
+
+            if not all(
+                math.isfinite(
+                    float(value)
+                )
+                for value in point
+            ):
+                return False
+
+        best = record.get(
+            "best_objectives"
+        )
+
+        if best is None:
+            return False
+
+        if len(best) != 4:
+            return False
+
+        if not all(
+            math.isfinite(
+                float(value)
+            )
+            for value in best
+        ):
+            return False
+
+        return True
+
+    def status(
+        self,
+        instance: CampaignInstance,
+        seed: int,
+    ) -> dict[str, str]:
+
+        result = {}
+
+        for algorithm in self.ALGORITHMS:
+
+            if self.is_result_valid(
+                instance,
+                seed,
+                algorithm,
+            ):
+
+                result[algorithm] = "complete"
+
+            else:
+
+                result[algorithm] = "pending"
+
+        return result
+
+    # ---------------------------------------------------------
     # Human-readable summary
     # ---------------------------------------------------------
 
@@ -539,3 +691,242 @@ class CampaignRunner:
                     self.result_root
                 ),
         }
+
+    # ---------------------------------------------------------
+    # Execute one algorithm
+    # ---------------------------------------------------------
+
+    def run_one(
+        self,
+        instance: CampaignInstance,
+        seed: int,
+        algorithm: str,
+    ) -> Path:
+
+        if algorithm not in self.ALGORITHMS:
+            raise ValueError(
+                f"Unknown algorithm: {algorithm}"
+            )
+
+        if self.is_result_valid(
+            instance,
+            seed,
+            algorithm,
+        ):
+
+            path = self.result_path(
+                instance,
+                seed,
+                algorithm,
+            )
+
+            print(
+                f"SKIP  {instance.instance} "
+                f"seed={seed} "
+                f"{algorithm}"
+            )
+
+            return path
+
+        print(
+            f"RUN   {instance.instance} "
+            f"seed={seed} "
+            f"{algorithm}"
+        )
+
+        runner = ExperimentalRunner(
+            instance=instance.path,
+            seeds=[seed],
+            population_size=self.population_size,
+            generations=self.generations,
+            result_root=self.result_root,
+        )
+
+        archive, best = runner.run_one_algorithm(
+            seed=seed,
+            algorithm=algorithm,
+        )
+
+        path = self.result_store.save_run(
+            instance=instance.instance,
+            algorithm=algorithm,
+            seed=seed,
+            population_size=self.population_size,
+            generations=self.generations,
+            archive_points=archive,
+            metrics={},
+            best_objectives=best,
+            metadata={
+                "campaign_group": instance.group,
+                "campaign_replication":
+                    instance.replication,
+                "campaign_path":
+                    str(instance.path),
+                "mode": algorithm,
+                "metrics_status":
+                    "pending_common_evaluation",
+            },
+            overwrite=True,
+        )
+
+        return path
+
+    # ---------------------------------------------------------
+    # Execute one instance/seed
+    # ---------------------------------------------------------
+
+    def run_instance_seed(
+        self,
+        instance: CampaignInstance,
+        seed: int,
+    ) -> dict[str, Path]:
+
+        paths = {}
+
+        for algorithm in self.ALGORITHMS:
+
+            paths[algorithm] = self.run_one(
+                instance,
+                seed,
+                algorithm,
+            )
+
+        return paths
+
+        # ---------------------------------------------------------
+    # Campaign progress
+    # ---------------------------------------------------------
+
+    def progress(self) -> dict[str, int]:
+
+        if not self.instances:
+            self.prepare()
+
+        total = (
+            len(self.instances)
+            * len(self.seeds)
+            * len(self.ALGORITHMS)
+        )
+
+        completed = 0
+
+        for instance in self.instances:
+
+            for seed in self.seeds:
+
+                for algorithm in self.ALGORITHMS:
+
+                    if self.is_result_valid(
+                        instance,
+                        seed,
+                        algorithm,
+                    ):
+
+                        completed += 1
+
+        return {
+            "total": total,
+            "completed": completed,
+            "remaining":
+                total - completed,
+        }
+
+    # ---------------------------------------------------------
+    # Run campaign
+    # ---------------------------------------------------------
+
+    def run(
+        self,
+        *,
+        limit: int | None = None,
+    ) -> dict[str, int]:
+
+        if not self.instances:
+            self.prepare()
+
+        progress = self.progress()
+
+        print()
+        print(
+            "=============================================="
+        )
+        print(
+            "CA-SMRCPSP CAMPAIGN"
+        )
+        print(
+            "=============================================="
+        )
+
+        print(
+            "Instances:",
+            len(self.instances),
+        )
+
+        print(
+            "Seeds:",
+            self.seeds,
+        )
+
+        print(
+            "Algorithms:",
+            self.ALGORITHMS,
+        )
+
+        print(
+            "Population:",
+            self.population_size,
+        )
+
+        print(
+            "Generations:",
+            self.generations,
+        )
+
+        print(
+            "Completed:",
+            progress["completed"],
+            "/",
+            progress["total"],
+        )
+
+        executed = 0
+
+        for instance in self.instances:
+
+            for seed in self.seeds:
+
+                for algorithm in self.ALGORITHMS:
+
+                    if (
+                        limit is not None
+                        and executed >= limit
+                    ):
+
+                        final = self.progress()
+
+                        return final
+
+                    if self.is_result_valid(
+                        instance,
+                        seed,
+                        algorithm,
+                    ):
+
+                        print(
+                            f"SKIP  "
+                            f"{instance.instance} "
+                            f"seed={seed} "
+                            f"{algorithm}"
+                        )
+
+                        continue
+
+                    self.run_one(
+                        instance,
+                        seed,
+                        algorithm,
+                    )
+
+                    executed += 1
+
+        return self.progress()
