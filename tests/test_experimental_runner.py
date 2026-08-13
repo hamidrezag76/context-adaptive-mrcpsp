@@ -144,7 +144,36 @@ def main():
         instance="j3010_1.mm"
     )
 
-    assert len(records) == 4
+    assert len(records) == 6
+
+    algorithms = {
+        record["algorithm"]
+        for record in records
+    }
+
+    assert algorithms == {
+        "baseline_nsga2",
+        "context_only_nsga2",
+        "ca_nsga2",
+    }
+
+    for record in records:
+
+        assert "metrics" in record
+
+        assert (
+            "hypervolume"
+            in record["metrics"]
+        )
+
+        assert (
+            "igd_plus"
+            in record["metrics"]
+        )
+
+        assert record["metrics"]["hypervolume"] >= 0.0
+
+        assert record["metrics"]["igd_plus"] >= 0.0
 
     for record in records:
 
