@@ -146,6 +146,7 @@ class BenchmarkRunner:
                             population_size=population_size,
                             generations=generations,
                             seed=seed_start + run_id,
+                            context_adaptive=True,
                         )
 
                         start = time.perf_counter()

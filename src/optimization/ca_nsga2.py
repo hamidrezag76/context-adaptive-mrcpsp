@@ -34,6 +34,7 @@ class NSGA2:
         generations: int = 100,
         seed: int | None = None,
         context_adaptive: bool = True,
+        operator_adaptive: bool = True,
     ):
 
         self.project = project
@@ -43,8 +44,10 @@ class NSGA2:
         self.generations = generations
 
         self.seed = seed
-        
+
         self.context_adaptive = context_adaptive
+
+        self.operator_adaptive = operator_adaptive
 
         self.population = Population()
 
@@ -378,7 +381,7 @@ class NSGA2:
         # before recording the first history entry.
         # ---------------------------------------------------------
 
-        if self.context_adaptive:
+        if self.context_adaptive and self.operator_adaptive:
 
             context = self.context.get()
 
@@ -459,26 +462,27 @@ class NSGA2:
                     max_generations=self.generations,
                 )
 
-                # -------------------------------------------------
-                # CRITICAL:
-                #
-                # Recalculate operator probabilities using the
-                # SAME context that will be stored in history.
-                # -------------------------------------------------
-
                 context = self.context.get()
 
-                self.crossover.probability = (
-                    self.operator_controller.crossover_probability(
-                        context
-                    )
-                )
+                if self.operator_adaptive:
 
-                self.mutation.probability = (
-                    self.operator_controller.mutation_probability(
-                        context
+                    self.crossover.probability = (
+                        self.operator_controller.crossover_probability(
+                            context
+                        )
                     )
-                )
+
+                    self.mutation.probability = (
+                        self.operator_controller.mutation_probability(
+                            context
+                        )
+                    )
+
+                else:
+
+                    self.crossover.probability = 0.90
+
+                    self.mutation.probability = 0.15
 
             else:
 
