@@ -174,6 +174,83 @@ class ExperimentalRunner:
         )
 
     # ---------------------------------------------------------
+    # Run one named algorithm
+    # ---------------------------------------------------------
+
+    def run_one_algorithm(
+        self,
+        *,
+        seed: int,
+        algorithm: str,
+    ):
+        """
+        Execute exactly one algorithm for one seed.
+
+        This method is used by CampaignRunner to support
+        resumable campaign execution.
+
+        Parameters
+        ----------
+        seed:
+            Random seed.
+
+        algorithm:
+            One of:
+
+                baseline_nsga2
+                context_only_nsga2
+                ca_nsga2
+
+        Returns
+        -------
+        tuple
+            archive_points, best_objectives
+        """
+
+        if algorithm not in (
+            "baseline_nsga2",
+            "context_only_nsga2",
+            "ca_nsga2",
+        ):
+            raise ValueError(
+                f"Unknown algorithm: {algorithm}"
+            )
+
+        if seed not in self.seeds:
+            raise ValueError(
+                f"Seed {seed} is not registered "
+                f"for this runner."
+            )
+
+        if algorithm == "baseline_nsga2":
+
+            context_adaptive = False
+            operator_adaptive = False
+
+        elif algorithm == "context_only_nsga2":
+
+            context_adaptive = True
+            operator_adaptive = False
+
+        else:
+
+            context_adaptive = True
+            operator_adaptive = True
+
+        archive_points, best_objectives = (
+            self._run_algorithm(
+                seed=seed,
+                context_adaptive=context_adaptive,
+                operator_adaptive=operator_adaptive,
+            )
+        )
+
+        return (
+            archive_points,
+            best_objectives,
+        )
+
+    # ---------------------------------------------------------
     # Execute all seeds
     # ---------------------------------------------------------
 
