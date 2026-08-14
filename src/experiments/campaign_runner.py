@@ -18,6 +18,10 @@ from src.experiments.experimental_runner import (
     ExperimentalRunner,
 )
 
+from src.experiments.metrics_evaluator import (
+    MultiSeedMetricsEvaluator,
+)
+
 from src.experiments.result_store import (
     ResultStore,
 )
@@ -807,7 +811,313 @@ class CampaignRunner:
 
         return paths
 
-        # ---------------------------------------------------------
+    # ---------------------------------------------------------
+    # Common evaluation for one benchmark instance
+    # ---------------------------------------------------------
+
+    def evaluate_instance(
+        self,
+        instance: CampaignInstance,
+    ) -> dict[str, object]:
+
+        baseline_archives = {}
+        context_only_archives = {}
+        adaptive_archives = {}
+
+        baseline_results = {}
+        context_only_results = {}
+        adaptive_results = {}
+
+        # -----------------------------------------------------
+        # Load all seeds for all three algorithms
+        # -----------------------------------------------------
+
+        for seed in self.seeds:
+
+            baseline_record = (
+                self.result_store.load_run(
+                    instance=instance.instance,
+                    algorithm="baseline_nsga2",
+                    seed=seed,
+                )
+            )
+
+            context_only_record = (
+                self.result_store.load_run(
+                    instance=instance.instance,
+                    algorithm="context_only_nsga2",
+                    seed=seed,
+                )
+            )
+
+            adaptive_record = (
+                self.result_store.load_run(
+                    instance=instance.instance,
+                    algorithm="ca_nsga2",
+                    seed=seed,
+                )
+            )
+
+            baseline_archives[seed] = (
+                baseline_record["archive_objectives"]
+            )
+
+            context_only_archives[seed] = (
+                context_only_record["archive_objectives"]
+            )
+
+            adaptive_archives[seed] = (
+                adaptive_record["archive_objectives"]
+            )
+
+            baseline_results[seed] = (
+                baseline_record
+            )
+
+            context_only_results[seed] = (
+                context_only_record
+            )
+
+            adaptive_results[seed] = (
+                adaptive_record
+            )
+
+        # -----------------------------------------------------
+        # Build one common evaluator
+        #
+        # All three algorithms and all seeds participate in:
+        #
+        #   - normalization
+        #   - nondominated reference set
+        #   - HV reference point
+        #
+        # This prevents algorithm-specific metric references.
+        # -----------------------------------------------------
+
+        evaluator = MultiSeedMetricsEvaluator(
+            baseline_archives=baseline_archives,
+            context_only_archives=context_only_archives,
+            adaptive_archives=adaptive_archives,
+        )
+
+        per_seed_metrics = {
+            int(result["seed"]): result
+            for result in evaluator.evaluate()
+        }
+
+        # -----------------------------------------------------
+        # Common metric metadata
+        # -----------------------------------------------------
+
+        common_metadata = {
+            "metric_reference_set":
+                "common_all_three_modes",
+
+            "metric_reference_point":
+                [
+                    float(value)
+                    for value
+                    in evaluator.reference_point
+                ],
+
+            "reference_set_size":
+                len(
+                    evaluator.reference_set
+                ),
+
+            "metrics_status":
+                "evaluated",
+        }
+
+        # -----------------------------------------------------
+        # Update all three stored results for every seed
+        # -----------------------------------------------------
+
+        for seed in self.seeds:
+
+            metric = per_seed_metrics[
+                seed
+            ]
+
+            # ---------------------------------------------
+            # Baseline
+            # ---------------------------------------------
+
+            self.result_store.update_run_evaluation(
+                instance=instance.instance,
+                algorithm="baseline_nsga2",
+                seed=seed,
+                metrics={
+                    "hypervolume":
+                        float(
+                            metric["baseline_hv"]
+                        ),
+
+                    "igd_plus":
+                        float(
+                            metric["baseline_igd_plus"]
+                        ),
+                },
+                metadata={
+                    **common_metadata,
+                    **self.MODES[
+                        "baseline_nsga2"
+                    ],
+                },
+            )
+
+            # ---------------------------------------------
+            # Context-only
+            # ---------------------------------------------
+
+            self.result_store.update_run_evaluation(
+                instance=instance.instance,
+                algorithm="context_only_nsga2",
+                seed=seed,
+                metrics={
+                    "hypervolume":
+                        float(
+                            metric["context_only_hv"]
+                        ),
+
+                    "igd_plus":
+                        float(
+                            metric["context_only_igd_plus"]
+                        ),
+                },
+                metadata={
+                    **common_metadata,
+                    **self.MODES[
+                        "context_only_nsga2"
+                    ],
+                },
+            )
+
+            # ---------------------------------------------
+            # Full CA
+            # ---------------------------------------------
+
+            self.result_store.update_run_evaluation(
+                instance=instance.instance,
+                algorithm="ca_nsga2",
+                seed=seed,
+                metrics={
+                    "hypervolume":
+                        float(
+                            metric["adaptive_hv"]
+                        ),
+
+                    "igd_plus":
+                        float(
+                            metric["adaptive_igd_plus"]
+                        ),
+                },
+                metadata={
+                    **common_metadata,
+                    **self.MODES[
+                        "ca_nsga2"
+                    ],
+                },
+            )
+
+        return {
+            "instance":
+                instance.instance,
+
+            "seeds":
+                list(self.seeds),
+
+            "reference_set_size":
+                len(
+                    evaluator.reference_set
+                ),
+
+            "reference_point":
+                [
+                    float(value)
+                    for value
+                    in evaluator.reference_point
+                ],
+
+            "evaluated_runs":
+                len(self.seeds)
+                * len(self.ALGORITHMS),
+        }
+
+    # ---------------------------------------------------------
+    # Evaluate complete campaign
+    # ---------------------------------------------------------
+
+    def evaluate_campaign(
+        self,
+        *,
+        limit: int | None = None,
+    ) -> dict[str, int]:
+
+        if not self.instances:
+            self.prepare()
+
+        evaluated_instances = 0
+        evaluated_runs = 0
+
+        print()
+        print(
+            "=============================================="
+        )
+        print(
+            "CA-SMRCPSP COMMON METRICS EVALUATION"
+        )
+        print(
+            "=============================================="
+        )
+
+        print(
+            "Instances:",
+            len(self.instances),
+        )
+
+        print(
+            "Seeds:",
+            self.seeds,
+        )
+
+        print(
+            "Algorithms:",
+            self.ALGORITHMS,
+        )
+
+        for instance in self.instances:
+
+            if (
+                limit is not None
+                and evaluated_instances >= limit
+            ):
+                break
+
+            print(
+                f"EVALUATE {instance.instance}"
+            )
+
+            self.evaluate_instance(
+                instance
+            )
+
+            evaluated_instances += 1
+
+            evaluated_runs += (
+                len(self.seeds)
+                * len(self.ALGORITHMS)
+            )
+
+        return {
+            "instances_evaluated":
+                evaluated_instances,
+
+            "runs_evaluated":
+                evaluated_runs,
+        }
+
+    # ---------------------------------------------------------
     # Campaign progress
     # ---------------------------------------------------------
 
