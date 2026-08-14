@@ -1,4 +1,4 @@
-﻿"""
+"""
 result_store.py
 
 Persistent storage for reproducible experimental results.
@@ -177,6 +177,87 @@ class ResultStore:
             parents=True,
             exist_ok=True,
         )
+
+        temporary_path = path.with_suffix(
+            ".tmp"
+        )
+
+        with temporary_path.open(
+            "w",
+            encoding="utf-8",
+        ) as file:
+
+            json.dump(
+                record,
+                file,
+                indent=2,
+                ensure_ascii=False,
+            )
+
+        temporary_path.replace(
+            path
+        )
+
+        return path
+
+    # ---------------------------------------------------------
+    # Update evaluation
+    # ---------------------------------------------------------
+
+    def update_run_evaluation(
+        self,
+        *,
+        instance: str,
+        algorithm: str,
+        seed: int,
+        metrics: dict[str, float],
+        metadata: dict[str, Any] | None = None,
+    ) -> Path:
+
+        path = self.run_path(
+            instance,
+            algorithm,
+            seed,
+        )
+
+        if not path.exists():
+
+            raise FileNotFoundError(
+                f"Result not found: {path}"
+            )
+
+        record = self.load_run(
+            instance=instance,
+            algorithm=algorithm,
+            seed=seed,
+        )
+
+        record["metrics"] = {
+            str(key): float(value)
+            for key, value in metrics.items()
+        }
+
+        if metadata is not None:
+
+            existing_metadata = record.get(
+                "metadata",
+                {},
+            )
+
+            if not isinstance(
+                existing_metadata,
+                dict,
+            ):
+
+                existing_metadata = {}
+
+            existing_metadata.update(
+                metadata
+            )
+
+            record["metadata"] = (
+                existing_metadata
+            )
 
         temporary_path = path.with_suffix(
             ".tmp"

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 import shutil
@@ -132,6 +132,82 @@ def main():
 
         print(
             "Save/load validation: PASS"
+        )
+
+        # -------------------------------------------------
+        # Evaluation update
+        # -------------------------------------------------
+
+        updated_path = (
+            store.update_run_evaluation(
+                instance="j3010_1.mm",
+                algorithm="ca_nsga2",
+                seed=42,
+                metrics={
+                    "hypervolume": 0.8125,
+                    "igd_plus": 0.0942,
+                },
+                metadata={
+                    "metric_reference_set":
+                        "common_all_three_modes",
+                    "metric_reference_point":
+                        [1.05, 1.05, 1.05, 1.05],
+                    "reference_set_size": 8,
+                    "metrics_status":
+                        "evaluated",
+                },
+            )
+        )
+
+        assert updated_path.exists()
+
+        updated_record = (
+            store.load_run(
+                instance="j3010_1.mm",
+                algorithm="ca_nsga2",
+                seed=42,
+            )
+        )
+
+        assert (
+            updated_record["metrics"]
+            ["hypervolume"]
+            == 0.8125
+        )
+
+        assert (
+            updated_record["metrics"]
+            ["igd_plus"]
+            == 0.0942
+        )
+
+        assert (
+            updated_record["metadata"]
+            ["metrics_status"]
+            == "evaluated"
+        )
+
+        assert (
+            updated_record["metadata"]
+            ["metric_reference_set"]
+            == "common_all_three_modes"
+        )
+
+        assert (
+            updated_record["archive_objectives"]
+            == [
+                list(point)
+                for point in archive
+            ]
+        )
+
+        assert (
+            updated_record["best_objectives"]
+            == list(best)
+        )
+
+        print(
+            "Evaluation update: PASS"
         )
 
         # -------------------------------------------------
