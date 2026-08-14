@@ -89,6 +89,13 @@ class CampaignRunner:
         },
     }
 
+    MANIFEST_COLUMNS = (
+        "instance",
+        "group",
+        "replication",
+        "path",
+    )
+
     def __init__(
         self,
         manifest: str | Path,
