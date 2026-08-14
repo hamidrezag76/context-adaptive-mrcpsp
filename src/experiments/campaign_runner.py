@@ -65,12 +65,25 @@ class CampaignRunner:
         "ca_nsga2",
     )
 
-    MANIFEST_COLUMNS = (
-        "instance",
-        "group",
-        "replication",
-        "path",
-    )
+    MODES = {
+        "baseline_nsga2": {
+            "mode": "baseline",
+            "context_adaptive": False,
+            "operator_adaptive": False,
+        },
+
+        "context_only_nsga2": {
+            "mode": "context_only",
+            "context_adaptive": True,
+            "operator_adaptive": False,
+        },
+
+        "ca_nsga2": {
+            "mode": "full_ca",
+            "context_adaptive": True,
+            "operator_adaptive": True,
+        },
+    }
 
     def __init__(
         self,
@@ -762,7 +775,8 @@ class CampaignRunner:
                     instance.replication,
                 "campaign_path":
                     str(instance.path),
-                "mode": algorithm,
+                **self.MODES[algorithm],
+
                 "metrics_status":
                     "pending_common_evaluation",
             },
