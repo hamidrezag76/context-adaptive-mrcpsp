@@ -9,7 +9,8 @@ from src.optimization.population import Population
 
 class PopulationInitializer:
     """
-    Generates an initial feasible population.
+    Generates an initial population with
+    resource-feasible execution modes.
     """
 
     def __init__(
@@ -29,72 +30,163 @@ class PopulationInitializer:
         population_size: int,
     ) -> Population:
 
+        if population_size <= 0:
+
+            raise ValueError(
+                "Population size must be positive."
+            )
+
         population = Population()
 
-        activity_ids = list(self.project.activities.keys())
+        activity_ids = list(
+            self.project.activities.keys()
+        )
 
         for _ in range(population_size):
 
-            priority = self._random_topological_order()
+            priority = (
+                self._random_topological_order()
+            )
 
             mode_assignment = {}
 
-            for activity in self.project.activities.values():
+            for activity_id in activity_ids:
 
-                mode = self.random.choice(activity.modes)
+                activity = self.project.activities[
+                    activity_id
+                ]
 
-                mode_assignment[activity.id] = mode.id
+                feasible_modes = (
+                    self._feasible_modes(activity)
+                )
+
+                if not feasible_modes:
+
+                    raise ValueError(
+                        "Activity has no resource-feasible "
+                        f"execution mode: "
+                        f"activity={activity.id}"
+                    )
+
+                mode = self.random.choice(
+                    feasible_modes
+                )
+
+                mode_assignment[
+                    activity.id
+                ] = mode.id
 
             chromosome = Chromosome(
-
                 priority_list=priority,
-
                 mode_assignment=mode_assignment,
-
             )
 
-            population.add(chromosome)
+            population.add(
+                chromosome
+            )
 
         return population
-    
+
+    # ---------------------------------------------------------
+
+    def _feasible_modes(
+        self,
+        activity,
+    ):
+
+        """
+        Return execution modes whose renewable
+        resource requirements do not exceed project
+        renewable capacities.
+        """
+
+        capacities = (
+            self.project.renewable_capacities
+        )
+
+        feasible = []
+
+        for mode in activity.modes:
+
+            if len(mode.renewable) > len(capacities):
+
+                continue
+
+            if all(
+                requirement <= capacity
+                for requirement, capacity
+                in zip(
+                    mode.renewable,
+                    capacities,
+                )
+            ):
+
+                feasible.append(
+                    mode
+                )
+
+        return feasible
+
+    # ---------------------------------------------------------
+
     def _random_topological_order(
         self,
     ) -> list[int]:
 
         predecessors = {
-            activity.id: set(activity.predecessors)
-            for activity in self.project.activities.values()
+            activity.id: set(
+                activity.predecessors
+            )
+            for activity
+            in self.project.activities.values()
         }
 
         available = [
-
             activity_id
-
-            for activity_id, preds in predecessors.items()
-
+            for activity_id, preds
+            in predecessors.items()
             if not preds
-
         ]
 
         order = []
 
         while available:
 
-            activity = self.random.choice(available)
+            activity = self.random.choice(
+                available
+            )
 
-            available.remove(activity)
+            available.remove(
+                activity
+            )
 
-            order.append(activity)
+            order.append(
+                activity
+            )
 
-            for successor in self.project.activities[activity].successors:
+            for successor in (
+                self.project.activities[
+                    activity
+                ].successors
+            ):
 
-                predecessors[successor].remove(activity)
+                predecessors[
+                    successor
+                ].remove(
+                    activity
+                )
 
-                if not predecessors[successor]:
+                if not predecessors[
+                    successor
+                ]:
 
-                    available.append(successor)
+                    available.append(
+                        successor
+                    )
 
-        if len(order) != len(self.project.activities):
+        if len(order) != len(
+            self.project.activities
+        ):
 
             raise RuntimeError(
                 "Topological ordering failed."

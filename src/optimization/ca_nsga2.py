@@ -197,8 +197,13 @@ class NSGA2:
             # Repair
             # ----------------------------
 
-            # child1 = self.repair.apply(child1)
-            # child2 = self.repair.apply(child2)
+            child1 = self.repair.apply(
+                child1
+            )
+
+            child2 = self.repair.apply(
+                child2
+            )
 
             offspring.add(child1)
 

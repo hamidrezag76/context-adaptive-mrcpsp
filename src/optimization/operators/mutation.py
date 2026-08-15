@@ -112,46 +112,57 @@ class Mutation:
     # =====================================================
 
     def mode_mutation(
-
         self,
-
         chromosome: Chromosome,
-
     ) -> None:
 
         activity_id = self.random.choice(
-
             list(chromosome.mode_assignment.keys())
-
         )
 
-        activity = self.project.activities[activity_id]
+        activity = self.project.activities[
+            activity_id
+        ]
 
         if len(activity.modes) <= 1:
-
             return
 
-        current = chromosome.mode_assignment[activity_id]
-        old_mode = current
+        current = chromosome.mode_assignment[
+            activity_id
+        ]
+
+        capacities = (
+            self.project.renewable_capacities
+        )
+
+        feasible_modes = [
+            mode
+            for mode in activity.modes
+            if len(mode.renewable)
+            <= len(capacities)
+            and all(
+                requirement <= capacity
+                for requirement, capacity
+                in zip(
+                    mode.renewable,
+                    capacities,
+                )
+            )
+        ]
 
         candidates = [
-
-            m.id
-
-            for m in activity.modes
-
-            if m.id != current
-
+            mode.id
+            for mode in feasible_modes
+            if mode.id != current
         ]
-        
-        if not candidates:
 
+        if not candidates:
             return
 
-        chromosome.mode_assignment[activity_id] = self.random.choice(
-
+        chromosome.mode_assignment[
+            activity_id
+        ] = self.random.choice(
             candidates
-
         )
 
     # =====================================================

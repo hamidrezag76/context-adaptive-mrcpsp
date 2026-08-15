@@ -78,33 +78,108 @@ class Repair:
         chromosome: Chromosome,
     ) -> None:
 
-        for activity in self.project.activities.values():
+        capacities = (
+            self.project.renewable_capacities
+        )
 
-            if activity.id not in chromosome.mode_assignment:
-                
-                if not activity.modes:
+        for activity in (
+            self.project.activities.values()
+        ):
 
-                    raise ValueError(
-                        f"Activity {activity.id} has no execution modes."
+            if not activity.modes:
+
+                raise ValueError(
+                    f"Activity {activity.id} "
+                    "has no execution modes."
+                )
+
+            # -------------------------------------------------
+            # Determine resource-feasible modes
+            # -------------------------------------------------
+
+            feasible_modes = [
+                mode
+                for mode in activity.modes
+                if len(mode.renewable)
+                <= len(capacities)
+                and all(
+                    requirement <= capacity
+                    for requirement, capacity
+                    in zip(
+                        mode.renewable,
+                        capacities,
                     )
+                )
+            ]
 
-                chromosome.mode_assignment[activity.id] = activity.modes[0].id
+            if not feasible_modes:
+
+                raise ValueError(
+                    "Activity has no resource-feasible "
+                    f"execution mode: "
+                    f"activity={activity.id}"
+                )
+
+            # -------------------------------------------------
+            # Missing assignment
+            # -------------------------------------------------
+
+            if activity.id not in (
+                chromosome.mode_assignment
+            ):
+
+                chromosome.mode_assignment[
+                    activity.id
+                ] = feasible_modes[0].id
 
                 continue
 
-            mode_id = chromosome.mode_assignment[activity.id]
+            # -------------------------------------------------
+            # Existing assignment
+            # -------------------------------------------------
 
-            valid = {m.id for m in activity.modes}
+            mode_id = chromosome.mode_assignment[
+                activity.id
+            ]
 
-            if mode_id not in valid:
-                
-                if not activity.modes:
+            valid_mode_ids = {
+                mode.id
+                for mode in activity.modes
+            }
 
-                    raise ValueError(
-                        f"Activity {activity.id} has no execution modes."
-                    )
+            # Invalid mode ID
+            if mode_id not in valid_mode_ids:
 
-                chromosome.mode_assignment[activity.id] = activity.modes[0].id
+                chromosome.mode_assignment[
+                    activity.id
+                ] = feasible_modes[0].id
+
+                continue
+
+            # -------------------------------------------------
+            # Existing mode is resource-infeasible
+            # -------------------------------------------------
+
+            selected_mode = next(
+                mode
+                for mode in activity.modes
+                if mode.id == mode_id
+            )
+
+            selected_feasible = all(
+                requirement <= capacity
+                for requirement, capacity
+                in zip(
+                    selected_mode.renewable,
+                    capacities,
+                )
+            )
+
+            if not selected_feasible:
+
+                chromosome.mode_assignment[
+                    activity.id
+                ] = feasible_modes[0].id
     
     def apply(
         self,
