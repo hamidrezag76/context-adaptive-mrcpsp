@@ -60,7 +60,10 @@ class NSGA2:
         
         self.evaluator = Evaluator(project)
 
-        self.selection = TournamentSelection(seed=seed)
+        self.selection = TournamentSelection(
+            seed=seed,
+            context_adaptive=context_adaptive,
+        )
 
         self.crossover = Crossover(
             seed=seed,
@@ -168,8 +171,15 @@ class NSGA2:
             # Parent Selection
             # ----------------------------
 
+            context = (
+                self.context.get()
+                if self.context_adaptive
+                else None
+            )
+
             parent1, parent2 = self.selection.select_pair(
-                self.population.individuals
+                self.population.individuals,
+                context=context,
             )
 
             # ----------------------------
