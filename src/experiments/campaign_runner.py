@@ -8,6 +8,7 @@ multi-mode experimental protocol.
 from __future__ import annotations
 
 import csv
+import json
 import math
 
 from dataclasses import dataclass
@@ -571,6 +572,9 @@ class CampaignRunner:
                 f"Unknown algorithm: {algorithm}"
             )
 
+        if int(seed) not in self.seeds:
+            return False
+
         path = self.result_path(
             instance,
             seed,
@@ -581,7 +585,6 @@ class CampaignRunner:
             return False
 
         try:
-
             record = self.result_store.load_run(
                 instance=instance.instance,
                 algorithm=algorithm,
@@ -592,17 +595,91 @@ class CampaignRunner:
             FileNotFoundError,
             OSError,
             ValueError,
+            TypeError,
+            json.JSONDecodeError,
         ):
             return False
+
+        # ---------------------------------------------------------
+        # Identity
+        # ---------------------------------------------------------
 
         if record.get("instance") != instance.instance:
             return False
 
-        if int(record.get("seed", -1)) != int(seed):
+        try:
+            if int(record.get("seed", -1)) != int(seed):
+                return False
+        except (TypeError, ValueError):
             return False
 
         if record.get("algorithm") != algorithm:
             return False
+
+        # ---------------------------------------------------------
+        # Experimental configuration
+        # ---------------------------------------------------------
+
+        try:
+            population_size = int(
+                record.get("population_size", -1)
+            )
+
+            generations = int(
+                record.get("generations", -1)
+            )
+
+        except (TypeError, ValueError):
+            return False
+
+        if population_size != self.population_size:
+            return False
+
+        if generations != self.generations:
+            return False
+
+        # ---------------------------------------------------------
+        # Algorithm configuration
+        # ---------------------------------------------------------
+
+        expected_mode = self.MODES[algorithm]
+
+        metadata = record.get(
+            "metadata",
+            {},
+        )
+
+        if not isinstance(metadata, dict):
+            return False
+
+        if metadata.get("mode") != expected_mode["mode"]:
+            return False
+
+        if (
+            bool(
+                metadata.get(
+                    "context_adaptive",
+                    False,
+                )
+            )
+            != expected_mode["context_adaptive"]
+        ):
+            return False
+
+        if (
+            bool(
+                metadata.get(
+                    "operator_adaptive",
+                    False,
+                )
+            )
+            != expected_mode["operator_adaptive"]
+        ):
+            return False
+
+        # ---------------------------------------------------------
+        # Archive
+        # ---------------------------------------------------------
 
         archive = record.get(
             "archive_objectives"
@@ -628,29 +705,182 @@ class CampaignRunner:
             if len(point) != 4:
                 return False
 
-            if not all(
-                math.isfinite(
+            try:
+                values = [
                     float(value)
-                )
-                for value in point
+                    for value in point
+                ]
+            except (TypeError, ValueError):
+                return False
+
+            if not all(
+                math.isfinite(value)
+                for value in values
             ):
                 return False
+
+        # ---------------------------------------------------------
+        # Archive size consistency
+        # ---------------------------------------------------------
+
+        try:
+            archive_size = int(
+                record.get(
+                    "archive_size",
+                    -1,
+                )
+            )
+        except (TypeError, ValueError):
+            return False
+
+        if archive_size != len(archive):
+            return False
+
+        # ---------------------------------------------------------
+        # Best objective vector
+        # ---------------------------------------------------------
 
         best = record.get(
             "best_objectives"
         )
 
-        if best is None:
+        if not isinstance(
+            best,
+            list,
+        ):
             return False
 
         if len(best) != 4:
             return False
 
-        if not all(
-            math.isfinite(
+        try:
+            best_values = [
                 float(value)
+                for value in best
+            ]
+        except (TypeError, ValueError):
+            return False
+
+        if not all(
+            math.isfinite(value)
+            for value in best_values
+        ):
+            return False
+
+        # ---------------------------------------------------------
+        # Metrics
+        # ---------------------------------------------------------
+
+        metrics = record.get(
+            "metrics"
+        )
+
+        if not isinstance(
+            metrics,
+            dict,
+        ):
+            return False
+
+        return True
+    
+    def is_evaluation_valid(
+        self,
+        instance: CampaignInstance,
+        seed: int,
+        algorithm: str,
+    ) -> bool:
+
+        if algorithm not in self.ALGORITHMS:
+            raise ValueError(
+                f"Unknown algorithm: {algorithm}"
             )
-            for value in best
+
+        if not self.is_result_valid(
+            instance,
+            seed,
+            algorithm,
+        ):
+            return False
+
+        try:
+            record = self.result_store.load_run(
+                instance=instance.instance,
+                algorithm=algorithm,
+                seed=seed,
+            )
+
+        except (
+            FileNotFoundError,
+            OSError,
+            ValueError,
+        ):
+            return False
+
+        metadata = record.get(
+            "metadata",
+            {},
+        )
+
+        if not isinstance(
+            metadata,
+            dict,
+        ):
+            return False
+
+        if (
+            metadata.get(
+                "metrics_status"
+            )
+            != "evaluated"
+        ):
+            return False
+
+        metrics = record.get(
+            "metrics",
+            {},
+        )
+
+        if not isinstance(
+            metrics,
+            dict,
+        ):
+            return False
+
+        if (
+            "hypervolume"
+            not in metrics
+        ):
+            return False
+
+        if (
+            "igd_plus"
+            not in metrics
+        ):
+            return False
+
+        try:
+
+            hypervolume = float(
+                metrics["hypervolume"]
+            )
+
+            igd_plus = float(
+                metrics["igd_plus"]
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+            return False
+
+        if not (
+            math.isfinite(
+                hypervolume
+            )
+            and math.isfinite(
+                igd_plus
+            )
         ):
             return False
 
@@ -1101,8 +1331,61 @@ class CampaignRunner:
             ):
                 break
 
+            # -------------------------------------------------
+            # Check whether common evaluation is already
+            # complete for every seed and algorithm.
+            # -------------------------------------------------
+
+            evaluation_complete = all(
+                self.is_evaluation_valid(
+                    instance,
+                    seed,
+                    algorithm,
+                )
+                for seed in self.seeds
+                for algorithm in self.ALGORITHMS
+            )
+
+            if evaluation_complete:
+
+                print(
+                    f"SKIP EVALUATION "
+                    f"{instance.instance}"
+                )
+
+                continue
+
+            # -------------------------------------------------
+            # Check whether all optimization runs required
+            # for common evaluation actually exist.
+            # -------------------------------------------------
+
+            optimization_complete = all(
+                self.is_result_valid(
+                    instance,
+                    seed,
+                    algorithm,
+                )
+                for seed in self.seeds
+                for algorithm in self.ALGORITHMS
+            )
+
+            if not optimization_complete:
+
+                print(
+                    f"SKIP INCOMPLETE "
+                    f"{instance.instance}"
+                )
+
+                continue
+
+            # -------------------------------------------------
+            # Evaluate the complete instance.
+            # -------------------------------------------------
+
             print(
-                f"EVALUATE {instance.instance}"
+                f"EVALUATE "
+                f"{instance.instance}"
             )
 
             self.evaluate_instance(
@@ -1160,6 +1443,50 @@ class CampaignRunner:
             "completed": completed,
             "remaining":
                 total - completed,
+        }
+        
+    # ---------------------------------------------------------
+    # Evaluation progress
+    # ---------------------------------------------------------
+
+    def evaluation_progress(
+        self,
+    ) -> dict[str, int]:
+        """
+        Return common-metric evaluation progress.
+
+        A run is counted as evaluated only when its
+        common HV/IGD+ evaluation is complete.
+        """
+
+        if not self.instances:
+            self.prepare()
+
+        total = (
+            len(self.instances)
+            * len(self.seeds)
+            * len(self.ALGORITHMS)
+        )
+
+        evaluated = 0
+
+        for instance in self.instances:
+
+            for seed in self.seeds:
+
+                for algorithm in self.ALGORITHMS:
+
+                    if self.is_evaluation_valid(
+                        instance,
+                        seed,
+                        algorithm,
+                    ):
+                        evaluated += 1
+
+        return {
+            "total": total,
+            "evaluated": evaluated,
+            "pending": total - evaluated,
         }
 
     # ---------------------------------------------------------
